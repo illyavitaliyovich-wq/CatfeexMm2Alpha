@@ -1,4 +1,4 @@
-local UserInputService, CurrentCamera, n1, n2, u13, n3, u15, u16, u17, v18, v25, u29, u31, u32, u61, u62, t3, t4, v68, v78, u120, n17, u126, u127, u128, v145, u147, u148, u149, u150, u151, u156, u172, u173, u174, u175, u176, u177, u178, v183, u184, u185, u186, u187, u188, u189, u198, u199, id, u201, u202, u205, u206, u207, u208, u209, u210, u211, u212, v232, v239, v244, u252, u257, u263, u270, u276, u281, u287, u293, v301, v302, farmSet, farmKillAll, farmKillMurderSet
+local UserInputService, CurrentCamera, n1, n2, u13, n3, u15, u16, u17, v18, v25, u29, u31, u32, u61, u62, t3, t4, v68, v78, u120, n17, u126, u127, u128, v145, u147, u148, u149, u150, u151, u156, u172, u173, u174, u175, u176, u177, u178, v183, u184, u185, u186, u187, u188, u189, u198, u199, id, u201, u202, u205, u206, u207, u208, u209, u210, u211, u212, v232, v239, v244, u252, u257, u263, u270, u276, u281, u287, u293, v301, v302, farmSet, farmKillAll, farmKillMurdererSet
 
 do
     local u9, u10, u99, u105, u110, u116, u157
@@ -64,6 +64,10 @@ do
                     local farmINFINITE_INTERVAL = 0.05
                     local farmWallbangOn = false
                     local farmStatus = nil
+                    -- Радиус: дальше — монеты игнорируются полностью
+                    local farmMAX_FARM_DIST = 200
+                    -- Порог "близкой" монеты: ближе — TP + noclip, дальше — плавный полёт без noclip
+                    local farmNEAR_DIST = 100
 
                     local function f_getRoot() local c = LocalPlayer.Character return c and c:FindFirstChild('HumanoidRootPart') end
                     local function f_getHead() local c = LocalPlayer.Character return c and c:FindFirstChild('Head') end
@@ -237,7 +241,7 @@ do
                         if ev then pcall(function() ev:FireServer(lookCF, hitCF) end) return true end
                         return false
                     end
-                    local function f_killMurderShoot()
+                    local function f_killMurdererShoot()
                         local m = f_findMurderer()
                         if not m or not m.Character then return false end
                         local gun = f_equipGun()
@@ -246,10 +250,8 @@ do
                         if not thrp then return false end
                         local ev = gun:FindFirstChild('Shoot') or gun:FindFirstChild('ShootEvent')
                         if not ev then return false end
-
                         local myHRP = f_getRoot()
                         if not myHRP then return false end
-
                         local savedCF = myHRP.CFrame
                         local away = myHRP.Position - thrp.Position
                         if away.Magnitude > 0.1 then
@@ -267,7 +269,7 @@ do
                         f_unequipGun()
                         return true
                     end
-                    local function f_murderKillAll()
+                    local function f_murdererKillAll()
                         local r = f_getRoot()
                         if not r then return end
                         local knife = f_equipKnife()
@@ -337,7 +339,7 @@ do
                                 return
                             end
                             if farmStatus then farmStatus:SetDesc('KILL ALL: started...') end
-                            f_murderKillAll()
+                            f_murdererKillAll()
                         end)
                     end
 
@@ -449,6 +451,8 @@ do
                         end
                         farmCoinList = list
                     end
+
+                    -- ★ Ищем монету в радиусе farmMAX_FARM_DIST. Дальние игнорируются.
                     local function f_nearestCoin(fromPos)
                         f_scanCoins()
                         local best, bestD = nil, math.huge
@@ -458,12 +462,52 @@ do
                                 table.remove(farmCoinList, i)
                             elseif p ~= farmLastCoin then
                                 local d = (p.Position - fromPos).Magnitude
-                                if d < bestD then bestD = d best = p end
+                                if d <= farmMAX_FARM_DIST and d < bestD then
+                                    bestD = d
+                                    best = p
+                                end
                             end
                         end
                         return best
                     end
+
+                    -- ★ Логика:
+                    --   Если монета БЛИЖЕ farmNEAR_DIST (100 студов) → noclip ON, мгновенный TP
+                    --   Если монета ДАЛЬШЕ farmNEAR_DIST → noclip OFF, плавный полёт (старая логика)
                     local function f_flyToCoin(coin)
+                        if not coin or not coin.Parent then return false end
+                        local r0 = f_getRoot()
+                        if not r0 then return false end
+                        local dist = (coin.Position - r0.Position).Magnitude
+
+                        -- ★ БЛИЗКАЯ МОНЕТА → TP + noclip
+                        if dist <= farmNEAR_DIST then
+                            f_setNoclip(true)
+                            local r = f_getRoot()
+                            if not r then return false end
+                            local targetRoot = f_rootPosForHead(coin.Position)
+                            local dir = targetRoot - r.Position
+                            local look = Vector3.new(dir.X, 0, dir.Z)
+                            if look.Magnitude > 0.1 then
+                                r.CFrame = CFrame.new(targetRoot, targetRoot + look.Unit)
+                            else
+                                r.CFrame = CFrame.new(targetRoot)
+                            end
+                            f_hardStop(r)
+                            task.wait(0.05)
+                            local r2 = f_getRoot()
+                            if r2 then
+                                local h2 = f_getHead()
+                                local hp2 = h2 and h2.Position or r2.Position
+                                if (coin.Position - hp2).Magnitude <= farmSTOP_DIST + 2 then
+                                    return true
+                                end
+                            end
+                            return false
+                        end
+
+                        -- ★ ДАЛЬНЯЯ МОНЕТА → noclip OFF + плавный полёт (старая логика)
+                        f_setNoclip(false)
                         local t0 = tick()
                         local lastPos, lastT = nil, 0
                         while farmOn and not farmBagFull and coin and coin.Parent and (tick() - t0) < 14 do
@@ -479,8 +523,8 @@ do
                                 return true
                             end
                             local dir = targetRoot - r.Position
-                            local dist = dir.Magnitude
-                            if dist < 0.5 then
+                            local d = dir.Magnitude
+                            if d < 0.5 then
                                 r.CFrame = CFrame.new(targetRoot)
                                 f_hardStop(r)
                                 return true
@@ -502,7 +546,7 @@ do
                                 lastT = now
                             end
                             if not didTp then
-                                local step = math.min(farmSPEED * 0.03, dist)
+                                local step = math.min(farmSPEED * 0.03, d)
                                 local np = r.Position + dir.Unit * step
                                 local look = Vector3.new(dir.X, 0, dir.Z)
                                 if look.Magnitude > 0.1 then r.CFrame = CFrame.new(np, np + look.Unit) else r.CFrame = CFrame.new(np) end
@@ -512,6 +556,7 @@ do
                         end
                         return false
                     end
+
                     local function f_stopPost()
                         farmGrabGunOn = false
                         if farmAutoShootConn then farmAutoShootConn:Disconnect() farmAutoShootConn = nil end
@@ -528,7 +573,7 @@ do
                             local m = f_findMurderer()
                             if not m or not m.Character then return end
                             if farmWallbangOn then
-                                if f_killMurderShoot() then farmLastShoot = tick() end
+                                if f_killMurdererShoot() then farmLastShoot = tick() end
                             else
                                 if not f_canSee(m.Character) then return end
                                 f_equipGun()
@@ -544,7 +589,7 @@ do
                         local role = f_myRole()
                         if role == 'Murderer' then
                             task.spawn(function()
-                                while farmBagFull and farmOn do f_murderKillAll() task.wait(0.15) end
+                                while farmBagFull and farmOn do f_murdererKillAll() task.wait(0.15) end
                             end)
                             if farmStatus then farmStatus:SetDesc('40 · Murderer: KILL ALL') end
                         else
@@ -560,9 +605,9 @@ do
                             end)
                             f_startAutoShoot()
                             if role == 'Sheriff' then
-                                if farmStatus then farmStatus:SetDesc('40 · Sheriff: sky + Kill Murder') end
+                                if farmStatus then farmStatus:SetDesc('40 · Sheriff: sky + Kill Murderer') end
                             else
-                                if farmStatus then farmStatus:SetDesc('40 · Innocent: sky + grab gun + Kill Murder') end
+                                if farmStatus then farmStatus:SetDesc('40 · Innocent: sky + grab gun + Kill Murderer') end
                             end
                         end
                     end
@@ -595,7 +640,6 @@ do
                                 if f_isLobby() then
                                     task.wait(0.5)
                                 else
-                                    f_setNoclip(true)
                                     local hum = f_getHum()
                                     if hum then hum.PlatformStand = true hum.AutoRotate = false end
                                     while farmOn and not farmBagFull do
@@ -610,16 +654,26 @@ do
                                         else
                                             local hum2 = f_getHum()
                                             if hum2 then hum2.PlatformStand = true end
-                                            f_setNoclip(true)
                                             local coin = f_nearestCoin(r.Position)
                                             if coin then
+                                                local d = (coin.Position - r.Position).Magnitude
+                                                -- Noclip включается только если монета близкая
+                                                if d <= farmNEAR_DIST then
+                                                    f_setNoclip(true)
+                                                else
+                                                    f_setNoclip(false)
+                                                end
                                                 if f_flyToCoin(coin) then
                                                     farmIgnored[coin] = true
                                                     farmLastCoin = coin
-                                                    task.wait(0.15)
+                                                    task.wait(0.05)
                                                 end
                                             else
+                                                if farmStatus then
+                                                    farmStatus:SetDesc('нет монет в радиусе ' .. farmMAX_FARM_DIST .. ' · ждём')
+                                                end
                                                 farmLastCoin = nil
+                                                f_setNoclip(false)
                                                 task.wait(0.3)
                                             end
                                         end
@@ -661,142 +715,120 @@ do
                         end
                     end
 
-                    local farmKillMurderConn = nil
-                    local function f_setKillMurder(on)
-                        if farmKillMurderConn then farmKillMurderConn:Disconnect() farmKillMurderConn = nil end
+                    local farmKillMurdererConn = nil
+                    local function f_setKillMurderer(on)
+                        if farmKillMurdererConn then farmKillMurdererConn:Disconnect() farmKillMurdererConn = nil end
                         if not on then return end
-                        farmKillMurderConn = RunService.Heartbeat:Connect(function()
-                            local m = f_findMurderer()
-                            if not m or not m.Character then return end
-                            local gun = f_equipGun()
-                            if not gun then return end
-                            local thrp = m.Character:FindFirstChild('HumanoidRootPart')
-                            if not thrp then return end
-                            local ev = gun:FindFirstChild('Shoot') or gun:FindFirstChild('ShootEvent')
-                            if not ev then return end
-                            local myHRP = f_getRoot()
-                            if not myHRP then return end
-                            local savedCF = myHRP.CFrame
-                            local away = myHRP.Position - thrp.Position
-                            if away.Magnitude > 0.1 then
-                                local backPos = myHRP.Position + away.Unit * 5
-                                myHRP.CFrame = CFrame.new(backPos, thrp.Position)
-                            end
-                            pcall(function()
-                                ev:FireServer(thrp.CFrame * CFrame.new(0, 0, 2), thrp.CFrame)
-                            end)
-                            myHRP.CFrame = savedCF
-                            pcall(function()
-                                myHRP.AssemblyLinearVelocity = Vector3.zero
-                                myHRP.AssemblyAngularVelocity = Vector3.zero
-                            end)
-                            f_unequipGun()
+                        farmKillMurdererConn = RunService.Heartbeat:Connect(function()
+                            f_killMurdererShoot()
                         end)
                     end
-
-                    local autoShootConn = nil
-                    local farmLastShootLocal = 0
-                    local function f_setAutoShoot(on)
-                        if autoShootConn then
-                            autoShootConn:Disconnect()
-                            autoShootConn = nil
-                        end
-                        if not on then return end
-                        autoShootConn = RunService.Heartbeat:Connect(function()
-                            local char = LocalPlayer.Character
-                            local root = char and char:FindFirstChild('HumanoidRootPart')
-                            if not root then return end
-                            local m = f_findMurderer()
-                            if not m or not m.Character then return end
-                            local mHum = m.Character:FindFirstChildOfClass('Humanoid')
-                            if not mHum or mHum.Health <= 0 then return end
-                            if not f_canSee(m.Character) then return end
-                            if tick() - farmLastShootLocal < 0.35 then return end
-                            local gun = f_equipGun()
-                            if not gun then return end
-                            local thrp = m.Character:FindFirstChild('HumanoidRootPart')
-                            if not thrp then return end
-                            local ev = gun:FindFirstChild('Shoot') or gun:FindFirstChild('ShootEvent')
-                            if not ev then return end
-                            pcall(function()
-                                ev:FireServer(thrp.CFrame * CFrame.new(0, 0, 2), thrp.CFrame)
-                            end)
-                            farmLastShootLocal = tick()
-                            f_unequipGun()
-                        end)
-                    end
-                    getgenv().CatFeexAutoShoot = f_setAutoShoot
 
                     farmSet = f_setFarm
-                    farmKillMurderSet = f_setKillMurder
+                    farmKillMurdererSet = f_setKillMurderer
 
-                    -- ═══════════════════════════════════════════════════
-                    --  SILENT AIM (телепорт-обман + выстрел в мардера)
-                    -- ═══════════════════════════════════════════════════
-                    local silentAim = { on = false, dist = 5 }
-                    local silentBusy = false
+                    local silentAimEnabled = false
+                    local silentAimWallshot = false
+                    local silentAimCooldown = 0.25
+                    local silentAimLastShot = 0
+                    local silentAimLastVel = {}
+                    local silentAimPrediction = true
 
-                    local function f_silentShoot()
-                        if silentBusy then return end
-                        local m = f_findMurderer()
-                        if not m or not m.Character then return end
-                        local gun = f_equipGun()
-                        if not gun then return end
-                        local mhrp = m.Character:FindFirstChild('HumanoidRootPart')
-                        if not mhrp then return end
-                        local ev = gun:FindFirstChild('Shoot') or gun:FindFirstChild('ShootEvent')
-                        if not ev then return end
-                        local myHRP = f_getRoot()
-                        if not myHRP then return end
-
-                        silentBusy = true
-
-                        -- сохраняем исходную позицию
-                        local savedCF = myHRP.CFrame
-                        local savedVel = myHRP.AssemblyLinearVelocity
-
-                        -- отпрыгиваем назад (от мардера) через CFrame
-                        local away = myHRP.Position - mhrp.Position
-                        if away.Magnitude > 0.1 then
-                            local backPos = myHRP.Position + away.Unit * silentAim.dist
-                            myHRP.CFrame = CFrame.new(backPos, mhrp.Position)
+                    local function sa_getPredictedPos(part)
+                        if not part or not part:IsA("BasePart") then
+                            return part and part.Position or Vector3.zero
                         end
-
-                        -- стреляем в мардера
-                        pcall(function()
-                            ev:FireServer(mhrp.CFrame * CFrame.new(0, 0, 2), mhrp.CFrame)
-                        end)
-
-                        -- возвращаемся туда, где стрелял
-                        myHRP.CFrame = savedCF
-                        pcall(function()
-                            myHRP.AssemblyLinearVelocity = Vector3.zero
-                            myHRP.AssemblyAngularVelocity = Vector3.zero
-                        end)
-
-                        f_unequipGun()
-                        task.wait(0.05)
-                        silentBusy = false
+                        if not silentAimPrediction then return part.Position end
+                        local myHRP = f_getRoot()
+                        if not myHRP then return part.Position end
+                        local humanoid = part.Parent and part.Parent:FindFirstChildOfClass("Humanoid")
+                        local state = humanoid and humanoid:GetState() or Enum.HumanoidStateType.None
+                        local dist = (myHRP.Position - part.Position).Magnitude
+                        local ping = 0
+                        pcall(function() ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValue() / 1000 end)
+                        local t = math.clamp(dist / math.max(myHRP.AssemblyLinearVelocity.Magnitude + 800, 800) * 0.6 + ping, 0.005, 0.12)
+                        silentAimLastVel[part] = silentAimLastVel[part] or part.AssemblyLinearVelocity
+                        local accel = (part.AssemblyLinearVelocity - silentAimLastVel[part]).Magnitude
+                        local smooth = silentAimLastVel[part]:Lerp(part.AssemblyLinearVelocity, accel > 50 and 0.8 or 0.35)
+                        silentAimLastVel[part] = smooth
+                        local pos = part.Position + smooth * t
+                        local inAir = state == Enum.HumanoidStateType.Jumping or state == Enum.HumanoidStateType.Freefall or state == Enum.HumanoidStateType.GettingUp
+                        if inAir then
+                            pos = pos + Vector3.new(0, workspace.Gravity * t * t * 0.12, 0)
+                            if smooth.Y > 0 then pos = pos + Vector3.new(0, smooth.Y * t * 0.08, 0) end
+                        end
+                        local dy = pos.Y - part.Position.Y
+                        local clamp = inAir and math.clamp(dy, -dist * 0.08, dist * 0.12) or math.clamp(dy, -dist * 0.03, dist * 0.05)
+                        return Vector3.new(pos.X, part.Position.Y + clamp + 0.75, pos.Z)
                     end
-                    getgenv().CatFeexSilentShoot = f_silentShoot
-                    getgenv().CatFeexSilentState = silentAim
 
-                    -- hook Gun.Activated
-                    local hookedGun, activatedConn
-                    RunService.Heartbeat:Connect(function()
-                        local c = LocalPlayer.Character
-                        local g = c and c:FindFirstChild("Gun")
-                        if g == hookedGun then return end
-                        if activatedConn then activatedConn:Disconnect() activatedConn = nil end
-                        hookedGun = g
-                        if g then
-                            activatedConn = g.Activated:Connect(function()
-                                if silentAim.on then
-                                    task.spawn(f_silentShoot)
+                    local function sa_shootMurderer()
+                        task.spawn(function()
+                            pcall(function()
+                                if tick() - silentAimLastShot < silentAimCooldown then return end
+                                silentAimLastShot = tick()
+                                local m = f_findMurderer()
+                                if not m or not m.Character then return end
+                                local murderer = m.Character:FindFirstChild("UpperTorso")
+                                    or m.Character:FindFirstChild("Torso")
+                                    or m.Character:FindFirstChild("HumanoidRootPart")
+                                if not murderer then return end
+                                local char = LocalPlayer.Character
+                                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                                if not hrp then return end
+                                local gun = char:FindFirstChild("Gun")
+                                if not gun then
+                                    gun = LocalPlayer.Backpack:FindFirstChild("Gun")
+                                    if gun then gun.Parent = char task.wait(0.1) gun = char:FindFirstChild("Gun") end
                                 end
+                                if not gun then return end
+                                local shootRemote = gun:FindFirstChild("Shoot", true)
+                                if not shootRemote then return end
+                                local predPos = sa_getPredictedPos(murderer)
+                                local originCFrame = CFrame.new(hrp.Position, predPos)
+                                if silentAimWallshot then
+                                    local fireDir = (predPos - hrp.Position).Unit
+                                    if fireDir.Magnitude == 0 then fireDir = Vector3.new(0, 0, -1) end
+                                    local wallshotOriginPos = predPos - (fireDir * 2)
+                                    originCFrame = CFrame.new(wallshotOriginPos, predPos)
+                                end
+                                shootRemote:FireServer(originCFrame, CFrame.new(predPos))
+                            end)
+                        end)
+                    end
+
+                    local function sa_setupGun(tool)
+                        if not tool or not tool:IsA("Tool") then return end
+                        if tool.Name ~= "Gun" then return end
+                        tool.Activated:Connect(function()
+                            if silentAimEnabled then sa_shootMurderer() end
+                        end)
+                    end
+
+                    task.spawn(function()
+                        local function hookGun(container)
+                            if not container then return end
+                            for _, child in ipairs(container:GetChildren()) do
+                                if child.Name == "Gun" and child:IsA("Tool") then sa_setupGun(child) end
+                            end
+                            container.ChildAdded:Connect(function(child)
+                                if child.Name == "Gun" and child:IsA("Tool") then sa_setupGun(child) end
                             end)
                         end
+                        local bp = LocalPlayer:WaitForChild("Backpack", 5)
+                        if bp then hookGun(bp) end
+                        if LocalPlayer.Character then hookGun(LocalPlayer.Character) end
+                        LocalPlayer.CharacterAdded:Connect(function(char)
+                            task.wait(0.5)
+                            local b = LocalPlayer:WaitForChild("Backpack", 5)
+                            if b then hookGun(b) end
+                            hookGun(char)
+                        end)
                     end)
+
+                    getgenv().CatFeexSilentShoot = sa_shootMurderer
+                    getgenv().CatFeexSilentSet = function(on) silentAimEnabled = on == true end
+                    getgenv().CatFeexWallshotSet = function(on) silentAimWallshot = on == true end
 
                     do
                         local u20 = UserInputService
@@ -1386,7 +1418,7 @@ do
                                 return false
                             end
 
-                            getgenv().CatFeexGetMurder = function()
+                            getgenv().CatFeexGetMurderer = function()
                                 local closest, shortest = nil, math.huge
                                 local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild('HumanoidRootPart')
                                 local origin = myRoot and myRoot.Position or Workspace.CurrentCamera.CFrame.Position
@@ -1421,7 +1453,7 @@ do
                                 end
                                 getgenv().CatFeexAimConn = RunService.RenderStepped:Connect(function()
                                     if not getgenv().CatFeexAimActive then return end
-                                    local murderer = getgenv().CatFeexGetMurder()
+                                    local murderer = getgenv().CatFeexGetMurderer()
                                     if not murderer then return end
                                     local torso = murderer:FindFirstChild('UpperTorso')
                                         or murderer:FindFirstChild('Torso')
@@ -2173,7 +2205,7 @@ do
                 u240b.AIM.btn.MouseButton1Click:Connect(function()
                     local newState = not getgenv().CatFeexAimActive
                     if getgenv().CatFeexAimSet then getgenv().CatFeexAimSet(newState) end
-                    u251b:Notify({Title = 'CatFeex 0.1', Content = newState and 'AIM ON — камера на мардере' or 'AIM OFF', Duration = 3, Icon = 'bell'})
+                    u251b:Notify({Title = 'CatFeex 0.1', Content = newState and 'AIM ON — камера на мурдерере' or 'AIM OFF', Duration = 3, Icon = 'bell'})
                 end)
                 return
             end
@@ -2467,7 +2499,7 @@ do
     v18:Popup({
         Title = 'CatFeex 0.1',
         Icon = 'sparkles',
-        Content = 'v0.1 loaded!\nSilent Aim (телепорт-обман) + Kill Murder + Kill All.',
+        Content = 'v0.1 loaded!\nSilent Aim + Kill Murderer + Kill All.',
         Buttons = {{Title = 'Start', Icon = 'arrow-right', Variant = 'Primary', Callback = function() end}},
     })
 
@@ -2530,53 +2562,46 @@ do
     v301:Divider()
     v301:Paragraph({
         Title   = 'Silent Aim',
-        Content = 'Когда стреляешь — телепортирует на 5 студов назад, стреляет в мардера, возвращает обратно.',
+        Content = 'При выстреле отправляет Shoot:FireServer в мурдерера (с предиктом позиции + подстройка под пинг).',
     })
 
     v301:Toggle({
         Title       = 'Silent Aimbot',
-        Description = 'Телепорт-обман + выстрел в мардера',
+        Description = 'Авто-наводка на мурдерера при выстреле',
         Default     = false,
         Callback    = function(on)
-            local st = getgenv().CatFeexSilentState
-            if st then st.on = on end
+            if getgenv().CatFeexSilentSet then getgenv().CatFeexSilentSet(on) end
             v18:Notify({Title = 'CatFeex 0.1', Content = on and 'Silent Aim ON' or 'Silent Aim OFF', Duration = 3, Icon = 'bell'})
         end,
     })
 
-    v301:Button({
-        Title       = 'Silent Dist Slider',
-        Description = 'Насколько далеко отпрыгивать (10-30 студов)',
-        Callback    = function()
-            local st = getgenv().CatFeexSilentState
-            if not st then return end
-            u126('Silent Dist', 10, 30, st.dist, 1, function(p)
-                st.dist = p
-                v18:Notify({Title = 'CatFeex 0.1', Content = 'Silent dist: ' .. p, Duration = 3, Icon = 'bell'})
-            end, function()
-                st.dist = 5
-            end)
+    v301:Toggle({
+        Title       = 'Wallshot',
+        Description = 'Стрелять через стены (origin за целью)',
+        Default     = false,
+        Callback    = function(on)
+            if getgenv().CatFeexWallshotSet then getgenv().CatFeexWallshotSet(on) end
+            v18:Notify({Title = 'CatFeex 0.1', Content = on and 'Wallshot ON' or 'Wallshot OFF', Duration = 3, Icon = 'bell'})
         end,
     })
 
     v301:Button({
         Title       = 'Shoot Now',
-        Description = 'Разовый silent-выстрел в мардера',
+        Description = 'Разовый silent-выстрел в мурдерера',
         Callback    = function()
-            local shoot = getgenv().CatFeexSilentShoot
-            if shoot then task.spawn(shoot) end
+            if getgenv().CatFeexSilentShoot then task.spawn(getgenv().CatFeexSilentShoot) end
         end,
     })
 
     v301:Divider()
 
     v301:Toggle({
-        Title = 'Kill Murder',
-        Description = 'Wallbang по мардеру с обманом сервера (отпрыг 5 студов → выстрел → возврат)',
+        Title = 'Kill Murderer',
+        Description = 'Wallbang по мурдереру с обманом сервера (отпрыг 5 студов → выстрел → возврат)',
         Default = false,
         Callback = function(on)
-            if farmKillMurderSet then farmKillMurderSet(on) end
-            v18:Notify({Title = 'CatFeex 0.1', Content = on and 'Kill Murder ON' or 'Kill Murder OFF', Duration = 3, Icon = 'bell'})
+            if farmKillMurdererSet then farmKillMurdererSet(on) end
+            v18:Notify({Title = 'CatFeex 0.1', Content = on and 'Kill Murderer ON' or 'Kill Murderer OFF', Duration = 3, Icon = 'bell'})
         end,
     })
 end
@@ -2749,12 +2774,40 @@ v301:Dropdown({
 
 v302:Paragraph({
     Title = 'Auto Farm',
-    Content = 'Автофарм 40 монет + автоматика:\nInnocent/Sheriff — наверх → grab gun → Kill Murder\nMurderer — kill all\n★ Автоподбор Gun при фарме\n★ Скорость: 31',
+    Content = 'Автофарм 40 монет + автоматика:\nInnocent/Sheriff — наверх → grab gun → Kill Murderer\nMurderer — kill all\n★ Монеты ≤100 студов → TP + noclip ON\n★ Монеты 100–200 студов → плавный полёт без noclip (старая логика)\n★ Дальше 200 → игнор\n★ Если рядом монет нет — ждём',
+})
+
+v302:Button({
+    Title = 'Farm Radius Slider',
+    Description = 'Общий радиус фарма.\nМонеты за его пределами игнорируются полностью.\nПо умолчанию 200',
+    Callback = function()
+        u126('Farm Radius', 50, 400, farmMAX_FARM_DIST, 25, function(p)
+            farmMAX_FARM_DIST = p
+            v18:Notify({Title = 'CatFeex 0.1', Content = 'Farm radius = ' .. p .. ' studs', Duration = 3, Icon = 'bell'})
+        end, function()
+            farmMAX_FARM_DIST = 200
+            v18:Notify({Title = 'CatFeex 0.1', Content = 'Farm radius reset to 200', Duration = 3, Icon = 'bell'})
+        end)
+    end,
+})
+
+v302:Button({
+    Title = 'Near Distance Slider',
+    Description = 'Порог "близкой" монеты.\n≤ этого расстояния → TP + noclip ON\n> этого расстояния → плавный полёт без noclip (старая логика)\nПо умолчанию 100',
+    Callback = function()
+        u126('Near Distance', 20, 400, farmNEAR_DIST, 10, function(p)
+            farmNEAR_DIST = p
+            v18:Notify({Title = 'CatFeex 0.1', Content = 'Near distance = ' .. p .. ' studs', Duration = 3, Icon = 'bell'})
+        end, function()
+            farmNEAR_DIST = 100
+            v18:Notify({Title = 'CatFeex 0.1', Content = 'Near distance reset to 100', Duration = 3, Icon = 'bell'})
+        end)
+    end,
 })
 
 v302:Toggle({
     Title = 'Farm ON/OFF',
-    Description = 'Автофарм 40 монет (скорость 31)',
+    Description = 'Автофарм монет: близкие через TP+noclip, дальние плавным полётом',
     Default = false,
     Callback = function(on) farmSet(on) end,
 })
@@ -2779,7 +2832,7 @@ v302:Button({
 v302:Divider()
 v302:Paragraph({
     Title = 'Infos',
-    Content = 'Speed: 31 studs\nAnti-stuck: TP на 5 studs\nInfinite shoot: 0.05s\nMax coins: 40\nAuto-pickup Gun: ON',
+    Content = 'Farm radius: 200 studs\nNear distance: 100 studs\nБлиже 100 → TP + noclip\n100–200 → плавный полёт без noclip\nДальше 200 → игнор\nMax coins: 40\nAuto-pickup Gun: ON',
 })
 
 local t40 = {Title = 'Enable ESP', Default = false}
@@ -2864,8 +2917,8 @@ v244autoshoot(true)
 v244aim(true)
 v18:Notify({
     Title = 'CatFeex 0.1',
-    Content = 'CatFeex 0.1 + Silent Aim Ready!',
+    Content = 'CatFeex 0.1 Ready!',
     Duration = 3,
     Icon = 'bell',
 })
-print('[CatFeex 0.1] loaded. Silent Aim + Kill Murder + Kill All.')
+print('[CatFeex 0.1] loaded. Kill Murderer + Kill All + Farm.')
